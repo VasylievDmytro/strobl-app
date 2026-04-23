@@ -14,6 +14,7 @@ import type {
   IncomingInvoice,
   InvoiceFilters,
   ReportFilters,
+  SmapOneAnalytics,
   TourRecord,
   TransportDetailBundle,
   TransportReport
@@ -22,6 +23,17 @@ import type {
 type DataverseRow = Record<string, unknown>;
 interface DataScope {
   bauleiter?: string;
+}
+
+interface SmapOneTimeEntry {
+  id: string;
+  source: "Tagesbericht" | "Transportbericht";
+  employeeName: string;
+  entryDate: string;
+  workHours: number;
+  projectNumber?: string;
+  bauleiter?: string;
+  address?: string;
 }
 
 const invoiceDocumentBaseUrl = process.env.INVOICE_DOCUMENT_BASE_URL?.replace(/\/$/, "");
@@ -200,6 +212,10 @@ function employeeMatchesUser(employeeName: string, userName?: string) {
   }
 
   return normalizeNameSignature(employeeName) === normalizeNameSignature(userName);
+}
+
+function formatSmapOneEmployeeName(lastName?: string, firstName?: string) {
+  return [lastName, firstName].filter(Boolean).join(" ");
 }
 
 function rankMap(
@@ -722,12 +738,120 @@ async function getGeoCaptureEntries(dateFrom: string, dateTo: string) {
     .filter((row) => Boolean(row.employeeName) && row.workHours > 0);
 }
 
+async function getSmapOneEntries(dateFrom: string, dateTo: string, projectNumbers: string[]) {
+  const reportFilters: ReportFilters = {
+    dateFrom,
+    dateTo,
+    lvNumbers: projectNumbers
+  };
+
+  const [dailyParents, transportParents] = await Promise.all([
+    getLiveDailyParents(reportFilters),
+    getLiveTransportParents(reportFilters)
+  ]);
+
+  const [resolvedDailyEmployeeRows, resolvedTransportTimeRows] = await Promise.all([
+    getRowsByParents(
+      "cr5ce_zeiterfassung_tagesberichts",
+      "cr5ce_zeiterfassung_tagesbericht",
+      "cr5ce_id_tagesbericht",
+      dailyParents.map((report) => report.id),
+      [
+        "cr5ce_zeiterfassung_tagesberichtid",
+        "cr5ce_id_tagesbericht",
+        "cr5ce_vorname",
+        "cr5ce_name",
+        "cr5ce_gesamtzeit"
+      ]
+    ),
+    getRowsByParents(
+      "cr5ce_zeiterfassungs",
+      "cr5ce_zeiterfassung",
+      "cr5ce_id_transportberucht",
+      transportParents.map((report) => report.id),
+      [
+        "cr5ce_zeiterfassungid",
+        "cr5ce_id_transportberucht",
+        "cr5ce_vorname",
+        "cr5ce_namen",
+        "cr5ce_gesamtzeit"
+      ]
+    )
+  ]);
+
+  const dailyParentsById = new Map(dailyParents.map((report) => [report.id, report]));
+  const transportParentsById = new Map(transportParents.map((report) => [report.id, report]));
+
+  const dailyEntries = resolvedDailyEmployeeRows.flatMap((row) => {
+      const parentId = lookupValue(row, "cr5ce_id_tagesbericht");
+      const report = dailyParentsById.get(parentId);
+      if (!report) {
+        return [];
+      }
+
+      const entry: SmapOneTimeEntry = {
+        id: `daily-${toText(row.cr5ce_zeiterfassung_tagesberichtid)}`,
+        source: "Tagesbericht",
+        employeeName: formatSmapOneEmployeeName(
+          toText(row.cr5ce_name),
+          toText(row.cr5ce_vorname)
+        ),
+        entryDate: report.date,
+        workHours: parseHours(row.cr5ce_gesamtzeit),
+        projectNumber: report.lvNumber,
+        bauleiter: report.bauleiter,
+        address: report.address
+      };
+
+      return entry.workHours > 0 ? [entry] : [];
+    });
+
+  const transportEntries = resolvedTransportTimeRows.flatMap((row) => {
+      const parentId = lookupValue(row, "cr5ce_id_transportberucht");
+      const report = transportParentsById.get(parentId);
+      if (!report) {
+        return [];
+      }
+
+      const entry: SmapOneTimeEntry = {
+        id: `transport-${toText(row.cr5ce_zeiterfassungid)}`,
+        source: "Transportbericht",
+        employeeName: formatSmapOneEmployeeName(
+          toText(row.cr5ce_namen),
+          toText(row.cr5ce_vorname)
+        ),
+        entryDate: report.date,
+        workHours: parseHours(row.cr5ce_gesamtzeit),
+        projectNumber: report.lvNumber,
+        bauleiter: report.bauleiter,
+        address: report.address
+      };
+
+      return entry.workHours > 0 ? [entry] : [];
+    });
+
+  return [...dailyEntries, ...transportEntries];
+}
+
 function matchesProjectFilter(entry: GeoCaptureEntry, projectNumbers: string[]) {
   if (!projectNumbers.length) {
     return true;
   }
 
   const projectValue = (entry.projectNumber || entry.costCenter || "").toLowerCase();
+  if (!projectValue) {
+    return false;
+  }
+
+  return projectNumbers.some((value) => projectValue.includes(value.toLowerCase()));
+}
+
+function matchesSmapOneProjectFilter(entry: SmapOneTimeEntry, projectNumbers: string[]) {
+  if (!projectNumbers.length) {
+    return true;
+  }
+
+  const projectValue = (entry.projectNumber || "").toLowerCase();
   if (!projectValue) {
     return false;
   }
@@ -766,6 +890,57 @@ function buildDailyTrend(entries: GeoCaptureEntry[], days: Date[]): GeoCaptureTr
 }
 
 function computeBusiestDay(entries: GeoCaptureEntry[]): GeoCaptureDailyPeak | undefined {
+  const dayMap = new Map<string, number>();
+
+  for (const entry of entries) {
+    const key = formatDateInputValue(new Date(entry.entryDate));
+    dayMap.set(key, (dayMap.get(key) ?? 0) + entry.workHours);
+  }
+
+  const topDay = Array.from(dayMap.entries()).sort((left, right) => right[1] - left[1])[0];
+
+  if (!topDay) {
+    return undefined;
+  }
+
+  return {
+    date: topDay[0],
+    label: dayFormatter.format(new Date(topDay[0])),
+    hours: topDay[1]
+  };
+}
+
+function buildSmapOneMonthlyTrend(entries: SmapOneTimeEntry[], months: Date[]): GeoCaptureTrendPoint[] {
+  return months.map((monthDate) => {
+    const value = formatMonthValue(monthDate);
+    const hours = entries
+      .filter((entry) => formatMonthValue(new Date(entry.entryDate)) === value)
+      .reduce((sum, entry) => sum + entry.workHours, 0);
+
+    return {
+      label: monthLabel(monthDate),
+      value,
+      hours
+    };
+  });
+}
+
+function buildSmapOneDailyTrend(entries: SmapOneTimeEntry[], days: Date[]): GeoCaptureTrendPoint[] {
+  return days.map((dayDate) => {
+    const value = formatDateInputValue(dayDate);
+    const hours = entries
+      .filter((entry) => formatDateInputValue(new Date(entry.entryDate)) === value)
+      .reduce((sum, entry) => sum + entry.workHours, 0);
+
+    return {
+      label: dayFormatter.format(dayDate),
+      value,
+      hours
+    };
+  });
+}
+
+function computeSmapOneBusiestDay(entries: SmapOneTimeEntry[]): GeoCaptureDailyPeak | undefined {
   const dayMap = new Map<string, number>();
 
   for (const entry of entries) {
@@ -939,6 +1114,140 @@ export async function getLiveGeoCaptureAnalytics(
     projectLeaderboard,
     vehicleLeaderboard,
     monthlyTrend: trendPoints
+  };
+}
+
+export async function getLiveSmapOneAnalytics(
+  filters: GeoCaptureAnalyticsFilters = {}
+): Promise<SmapOneAnalytics> {
+  const periodMode = filters.periodMode === "day" ? "day" : "month";
+  const selectedMonthRange = getMonthRange(filters.month);
+  const selectedDayRange = getDayRange(filters.date);
+  const rangeStart = periodMode === "day" ? selectedDayRange.start : selectedMonthRange.start;
+  const rangeEnd = periodMode === "day" ? selectedDayRange.end : selectedMonthRange.end;
+  const trendStart =
+    periodMode === "day" ? addMonths(rangeStart, 0) : addMonths(selectedMonthRange.start, -5);
+  const dataStart =
+    periodMode === "day"
+      ? new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate() - 6)
+      : trendStart;
+  const projectNumbers = Array.from(new Set((filters.projectNumbers ?? []).filter(Boolean)));
+
+  const trendEntries = await getSmapOneEntries(
+    formatDateInputValue(dataStart),
+    formatDateInputValue(rangeEnd),
+    projectNumbers
+  );
+
+  const scopedEntries =
+    filters.isAdmin || !filters.userName
+      ? trendEntries
+      : trendEntries.filter((entry) => employeeMatchesUser(entry.employeeName, filters.userName));
+
+  const periodEntries = scopedEntries.filter((entry) => {
+    const entryDate = new Date(entry.entryDate);
+    return periodMode === "day"
+      ? formatDateInputValue(entryDate) === selectedDayRange.dateValue
+      : formatMonthValue(entryDate) === selectedMonthRange.monthValue;
+  });
+
+  const availableEmployees = distinctSorted(periodEntries.map((entry) => entry.employeeName));
+  const availableBauleiter = distinctSorted(periodEntries.map((entry) => entry.bauleiter || ""));
+  const availableProjects = distinctSorted(periodEntries.map((entry) => entry.projectNumber || ""));
+  const employeeName = filters.employeeName?.trim();
+  const bauleiter = filters.bauleiter?.trim();
+
+  const selectedEntries = periodEntries.filter((entry) => {
+    if (employeeName && entry.employeeName !== employeeName) {
+      return false;
+    }
+
+    if (bauleiter && entry.bauleiter !== bauleiter) {
+      return false;
+    }
+
+    return matchesSmapOneProjectFilter(entry, projectNumbers);
+  });
+
+  const filteredScopedEntries = scopedEntries.filter((entry) => {
+    if (employeeName && entry.employeeName !== employeeName) {
+      return false;
+    }
+
+    if (bauleiter && entry.bauleiter !== bauleiter) {
+      return false;
+    }
+
+    return matchesSmapOneProjectFilter(entry, projectNumbers);
+  });
+
+  const employeeMap = new Map<string, { hours: number; secondary?: string }>();
+  const bauleiterMap = new Map<string, { hours: number; secondary?: string }>();
+  const projectMap = new Map<string, { hours: number; secondary?: string }>();
+  const sourceMap = new Map<string, { hours: number; secondary?: string }>();
+
+  for (const entry of selectedEntries) {
+    employeeMap.set(entry.employeeName, {
+      hours: (employeeMap.get(entry.employeeName)?.hours ?? 0) + entry.workHours,
+      secondary: entry.bauleiter
+    });
+
+    const bauleiterLabel = entry.bauleiter || "Ohne Bauleiter";
+    bauleiterMap.set(bauleiterLabel, {
+      hours: (bauleiterMap.get(bauleiterLabel)?.hours ?? 0) + entry.workHours
+    });
+
+    const projectLabel = entry.projectNumber || "Ohne Projekt";
+    projectMap.set(projectLabel, {
+      hours: (projectMap.get(projectLabel)?.hours ?? 0) + entry.workHours,
+      secondary: entry.address
+    });
+
+    sourceMap.set(entry.source, {
+      hours: (sourceMap.get(entry.source)?.hours ?? 0) + entry.workHours
+    });
+  }
+
+  const totalHours = selectedEntries.reduce((sum, entry) => sum + entry.workHours, 0);
+  const activeEmployees = employeeMap.size;
+
+  return {
+    periodMode,
+    selectedLabel:
+      periodMode === "day" ? dayLabel(selectedDayRange.start) : monthLongLabel(selectedMonthRange.start),
+    selectedMonth: selectedMonthRange.monthValue,
+    selectedMonthLabel: monthLongLabel(selectedMonthRange.start),
+    selectedDate: selectedDayRange.dateValue,
+    availableEmployees,
+    availableBauleiter,
+    availableProjects,
+    totalHours,
+    activeEmployees,
+    averageHoursPerEmployee: activeEmployees ? totalHours / activeEmployees : 0,
+    workdays: new Set(
+      selectedEntries.map((entry) => formatDateInputValue(new Date(entry.entryDate)))
+    ).size,
+    entryCount: selectedEntries.length,
+    topEmployee: rankMap(employeeMap, 8)[0],
+    busiestDay: computeSmapOneBusiestDay(selectedEntries),
+    employeeLeaderboard: rankMap(employeeMap, 8),
+    bauleiterLeaderboard: rankMap(bauleiterMap, 6),
+    projectLeaderboard: rankMap(projectMap, 6),
+    sourceLeaderboard: rankMap(sourceMap, 6),
+    monthlyTrend:
+      periodMode === "day"
+        ? buildSmapOneDailyTrend(
+            filteredScopedEntries,
+            Array.from({ length: 7 }, (_, index) => {
+              const date = new Date(rangeStart);
+              date.setDate(rangeStart.getDate() + index - 6);
+              return date;
+            })
+          )
+        : buildSmapOneMonthlyTrend(
+            filteredScopedEntries,
+            Array.from({ length: 6 }, (_, index) => addMonths(selectedMonthRange.start, index - 5))
+          )
   };
 }
 

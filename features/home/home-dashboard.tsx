@@ -41,6 +41,12 @@ const quickLinks = [
     description: "Arbeitszeiten, Monatswerte und Mitarbeiteranalysen auf einen Blick.",
     href: "/geocapture",
     icon: BarChart3
+  },
+  {
+    title: "SmapOne",
+    description: "Kombinierte Analyse aus Tagesbericht und Transportbericht mit Monatsfokus.",
+    href: "/smapone",
+    icon: Sparkles
   }
 ] as const;
 

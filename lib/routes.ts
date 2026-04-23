@@ -63,6 +63,11 @@ export const appRoutes: AppRoute[] = [
     title: "GeoCapture",
     href: "/geocapture",
     icon: GeoCaptureSectionIcon
+  },
+  {
+    title: "SmapOne",
+    href: "/smapone",
+    icon: GeoCaptureSectionIcon
   }
 ];
 
@@ -73,7 +78,8 @@ export const routeTitles = new Map<string, string>([
   ["/btr-system", "BTR System"],
   ["/transportbericht", "Transportbericht"],
   ["/geocapture", "GeoCapture"],
-  ["/tagesbericht", "Tagesbericht"]
+  ["/tagesbericht", "Tagesbericht"],
+  ["/smapone", "SmapOne"]
 ]);
 
 export function getRouteTitle(pathname: string) {

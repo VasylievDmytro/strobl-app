@@ -188,7 +188,7 @@ export function Sidebar({
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen border-r border-white/70 bg-[linear-gradient(180deg,rgba(249,252,253,0.94),rgba(241,246,249,0.9))] p-4 text-ink-900 backdrop-blur-xl transition-all duration-300 lg:rounded-r-[2.2rem]",
+          "fixed left-0 top-0 z-50 h-screen overflow-y-auto border-r border-white/70 bg-[linear-gradient(180deg,rgba(249,252,253,0.94),rgba(241,246,249,0.9))] p-4 text-ink-900 backdrop-blur-xl transition-all duration-300 lg:rounded-r-[2.2rem]",
           collapsed ? "w-[104px]" : "w-[344px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}

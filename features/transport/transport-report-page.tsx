@@ -296,8 +296,8 @@ export function TransportReportPage() {
         <MasterList
           title="Berichte"
           count={response?.data.length ?? 0}
-          className="xl:h-[calc(100vh+34rem)] xl:min-h-0"
-          contentClassName="xl:h-[calc(100vh+28rem)] xl:overflow-y-auto xl:pr-2"
+          className="lg:h-[calc(100vh+34rem)] lg:min-h-0"
+          contentClassName="lg:h-[calc(100vh+28rem)] lg:overflow-y-auto lg:pr-2"
         >
           {loadingList ? (
             <>

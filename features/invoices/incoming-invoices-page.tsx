@@ -312,8 +312,8 @@ export function IncomingInvoicesPage() {
         <MasterList
           title="Rechnungsliste"
           count={response?.data.length ?? 0}
-          className="xl:h-[calc(100vh+20rem)] xl:min-h-0"
-          contentClassName="xl:min-h-0 xl:h-[calc(100vh+14rem)] xl:overflow-y-auto xl:pr-2"
+          className="lg:h-[calc(100vh+20rem)] lg:min-h-0"
+          contentClassName="lg:min-h-0 lg:h-[calc(100vh+14rem)] lg:overflow-y-auto lg:pr-2"
         >
           {loading ? (
             <>

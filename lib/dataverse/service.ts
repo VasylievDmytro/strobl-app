@@ -20,6 +20,7 @@ import {
 import { isLiveDataverseEnabled } from "@/lib/dataverse/config";
 import {
   getLiveGeoCaptureAnalytics,
+  getLiveSmapOneAnalytics,
   getLiveDailyFilterOptions,
   getLiveDailyReportAccess,
   getLiveDailyReportDetails,
@@ -42,6 +43,7 @@ import type {
   HomeSummary,
   InvoiceFilters,
   ReportFilters,
+  SmapOneAnalytics,
   TransportDetailBundle
 } from "@/lib/dataverse/models";
 
@@ -122,6 +124,250 @@ function getCurrentMonthValue() {
   return formatMonthValue(new Date());
 }
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseMonthValue(value?: string) {
+  if (!value || !/^\d{4}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month] = value.split("-").map((part) => Number.parseInt(part, 10));
+  if (!year || !month || month < 1 || month > 12) {
+    return null;
+  }
+
+  return new Date(year, month - 1, 1);
+}
+
+function getMonthRange(monthValue?: string) {
+  const today = new Date();
+  const parsed = parseMonthValue(monthValue) ?? new Date(today.getFullYear(), today.getMonth(), 1);
+  const start = new Date(parsed.getFullYear(), parsed.getMonth(), 1);
+  const end = new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0);
+
+  return {
+    monthValue: formatMonthValue(start),
+    start,
+    end
+  };
+}
+
+function getDayRange(dateValue?: string) {
+  const parsed =
+    dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+      ? new Date(`${dateValue}T00:00:00`)
+      : new Date();
+
+  const start = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  const end = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+
+  return {
+    dateValue: formatDateInputValue(start),
+    start,
+    end
+  };
+}
+
+function addMonths(date: Date, amount: number) {
+  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+const monthFormatter = new Intl.DateTimeFormat("de-DE", {
+  month: "short",
+  year: "numeric"
+});
+
+const monthLongFormatter = new Intl.DateTimeFormat("de-DE", {
+  month: "long",
+  year: "numeric"
+});
+
+const dayFormatter = new Intl.DateTimeFormat("de-DE", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+});
+
+function monthLabel(date: Date) {
+  const formatted = monthFormatter.format(date);
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function monthLongLabel(date: Date) {
+  const formatted = monthLongFormatter.format(date);
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function dayLabel(date: Date) {
+  return dayFormatter.format(date);
+}
+
+function normalizeNameSignature(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .split(/[\s,.-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .sort()
+    .join("|");
+}
+
+function employeeMatchesUser(employeeName: string, userName?: string) {
+  if (!userName) {
+    return false;
+  }
+
+  return normalizeNameSignature(employeeName) === normalizeNameSignature(userName);
+}
+
+type RankedMetric = {
+  hours: number;
+  secondary?: string;
+};
+
+interface SmapOneTimeEntry {
+  id: string;
+  source: "Tagesbericht" | "Transportbericht";
+  employeeName: string;
+  entryDate: string;
+  workHours: number;
+  projectNumber?: string;
+  bauleiter?: string;
+  address?: string;
+}
+
+function rankMap(source: Map<string, RankedMetric>, limit = 6) {
+  return Array.from(source.entries())
+    .map(([label, meta]) => ({
+      label,
+      value: meta.hours,
+      secondary: meta.secondary
+    }))
+    .sort((left, right) => right.value - left.value)
+    .slice(0, limit);
+}
+
+function buildSmapOneMonthlyTrend(entries: SmapOneTimeEntry[], months: Date[]) {
+  return months.map((monthDate) => {
+    const value = formatMonthValue(monthDate);
+    const hours = entries
+      .filter((entry) => formatMonthValue(new Date(entry.entryDate)) === value)
+      .reduce((sum, entry) => sum + entry.workHours, 0);
+
+    return {
+      label: monthLabel(monthDate),
+      value,
+      hours
+    };
+  });
+}
+
+function buildSmapOneDailyTrend(entries: SmapOneTimeEntry[], days: Date[]) {
+  return days.map((dayDate) => {
+    const value = formatDateInputValue(dayDate);
+    const hours = entries
+      .filter((entry) => formatDateInputValue(new Date(entry.entryDate)) === value)
+      .reduce((sum, entry) => sum + entry.workHours, 0);
+
+    return {
+      label: dayLabel(dayDate),
+      value,
+      hours
+    };
+  });
+}
+
+function computeSmapOneBusiestDay(entries: SmapOneTimeEntry[]) {
+  const dayMap = new Map<string, number>();
+
+  for (const entry of entries) {
+    const key = formatDateInputValue(new Date(entry.entryDate));
+    dayMap.set(key, (dayMap.get(key) ?? 0) + entry.workHours);
+  }
+
+  const topDay = Array.from(dayMap.entries()).sort((left, right) => right[1] - left[1])[0];
+  if (!topDay) {
+    return undefined;
+  }
+
+  return {
+    date: topDay[0],
+    label: dayFormatter.format(new Date(topDay[0])),
+    hours: topDay[1]
+  };
+}
+
+function matchesProjectNumber(value: string | undefined, projectNumbers: string[]) {
+  if (!projectNumbers.length) {
+    return true;
+  }
+
+  const normalized = (value ?? "").toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return projectNumbers.some((project) => normalized.includes(project.toLowerCase()));
+}
+
+function formatSmapOneEmployeeName(lastName?: string, firstName?: string) {
+  return [lastName, firstName].filter(Boolean).join(" ");
+}
+
+function getMockSmapOneEntries() {
+  const dailyReportsById = new Map(dailyReports.map((report) => [report.id, report]));
+  const transportReportsById = new Map(transportReports.map((report) => [report.id, report]));
+
+  const dailyEntries = dailyEmployeeRecords.flatMap((record) => {
+      const report = dailyReportsById.get(record.parentId);
+      if (!report) {
+        return [];
+      }
+
+      const entry: SmapOneTimeEntry = {
+        id: `daily-${record.id}`,
+        source: "Tagesbericht",
+        employeeName: formatSmapOneEmployeeName(record.lastName, record.firstName),
+        entryDate: report.date,
+        workHours: record.totalHours,
+        projectNumber: report.lvNumber,
+        bauleiter: report.bauleiter,
+        address: report.address
+      };
+
+      return entry.workHours > 0 ? [entry] : [];
+    });
+
+  const transportEntries = transportTimeRecords.flatMap((record) => {
+      const report = transportReportsById.get(record.parentId);
+      if (!report) {
+        return [];
+      }
+
+      const entry: SmapOneTimeEntry = {
+        id: `transport-${record.id}`,
+        source: "Transportbericht",
+        employeeName: formatSmapOneEmployeeName(record.lastName, record.firstName),
+        entryDate: report.date,
+        workHours: record.totalHours,
+        projectNumber: report.lvNumber,
+        bauleiter: report.bauleiter,
+        address: report.address
+      };
+
+      return entry.workHours > 0 ? [entry] : [];
+    });
+
+  return [...dailyEntries, ...transportEntries];
+}
+
 export async function getGeoCaptureAnalytics(filters: GeoCaptureAnalyticsFilters = {}) {
   if (isLiveDataverseEnabled()) {
     return getLiveGeoCaptureAnalytics(filters);
@@ -194,6 +440,140 @@ export async function getGeoCaptureAnalytics(filters: GeoCaptureAnalyticsFilters
   };
 
   return fallback;
+}
+
+export async function getSmapOneAnalytics(
+  filters: GeoCaptureAnalyticsFilters = {}
+): Promise<SmapOneAnalytics> {
+  if (isLiveDataverseEnabled()) {
+    return getLiveSmapOneAnalytics(filters);
+  }
+
+  await wait(220);
+
+  const periodMode = filters.periodMode === "day" ? "day" : "month";
+  const selectedMonthRange = getMonthRange(filters.month);
+  const selectedDayRange = getDayRange(filters.date);
+  const rangeStart = periodMode === "day" ? selectedDayRange.start : selectedMonthRange.start;
+  const rangeEnd = periodMode === "day" ? selectedDayRange.end : selectedMonthRange.end;
+
+  const allEntries = getMockSmapOneEntries();
+  const scopedEntries =
+    filters.isAdmin || !filters.userName
+      ? allEntries
+      : allEntries.filter((entry) => employeeMatchesUser(entry.employeeName, filters.userName));
+
+  const periodEntries = scopedEntries.filter((entry) => {
+    const entryDate = new Date(entry.entryDate);
+    return periodMode === "day"
+      ? formatDateInputValue(entryDate) === selectedDayRange.dateValue
+      : formatMonthValue(entryDate) === selectedMonthRange.monthValue;
+  });
+
+  const availableEmployees = Array.from(
+    new Set(periodEntries.map((entry) => entry.employeeName).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right, "de"));
+  const availableBauleiter = Array.from(
+    new Set(periodEntries.map((entry) => entry.bauleiter).filter(Boolean))
+  ).sort((left, right) => left!.localeCompare(right!, "de")) as string[];
+  const availableProjects = Array.from(
+    new Set(periodEntries.map((entry) => entry.projectNumber).filter(Boolean))
+  ).sort((left, right) => left!.localeCompare(right!, "de")) as string[];
+
+  const employeeName = filters.employeeName?.trim();
+  const bauleiter = filters.bauleiter?.trim();
+  const projectNumbers = Array.from(new Set((filters.projectNumbers ?? []).filter(Boolean)));
+
+  const selectedEntries = periodEntries.filter((entry) => {
+    if (employeeName && entry.employeeName !== employeeName) {
+      return false;
+    }
+
+    if (bauleiter && entry.bauleiter !== bauleiter) {
+      return false;
+    }
+
+    return matchesProjectNumber(entry.projectNumber, projectNumbers);
+  });
+
+  const filteredScopedEntries = scopedEntries.filter((entry) => {
+    if (employeeName && entry.employeeName !== employeeName) {
+      return false;
+    }
+
+    if (bauleiter && entry.bauleiter !== bauleiter) {
+      return false;
+    }
+
+    return matchesProjectNumber(entry.projectNumber, projectNumbers);
+  });
+
+  const employeeMap = new Map<string, RankedMetric>();
+  const bauleiterMap = new Map<string, RankedMetric>();
+  const projectMap = new Map<string, RankedMetric>();
+  const sourceMap = new Map<string, RankedMetric>();
+
+  for (const entry of selectedEntries) {
+    employeeMap.set(entry.employeeName, {
+      hours: (employeeMap.get(entry.employeeName)?.hours ?? 0) + entry.workHours,
+      secondary: entry.bauleiter
+    });
+
+    const bauleiterLabel = entry.bauleiter || "Ohne Bauleiter";
+    bauleiterMap.set(bauleiterLabel, {
+      hours: (bauleiterMap.get(bauleiterLabel)?.hours ?? 0) + entry.workHours
+    });
+
+    const projectLabel = entry.projectNumber || "Ohne Projekt";
+    projectMap.set(projectLabel, {
+      hours: (projectMap.get(projectLabel)?.hours ?? 0) + entry.workHours,
+      secondary: entry.address
+    });
+
+    sourceMap.set(entry.source, {
+      hours: (sourceMap.get(entry.source)?.hours ?? 0) + entry.workHours
+    });
+  }
+
+  const totalHours = selectedEntries.reduce((sum, entry) => sum + entry.workHours, 0);
+  const activeEmployees = employeeMap.size;
+
+  return {
+    periodMode,
+    selectedLabel:
+      periodMode === "day" ? dayLabel(selectedDayRange.start) : monthLongLabel(selectedMonthRange.start),
+    selectedMonth: selectedMonthRange.monthValue,
+    selectedMonthLabel: monthLongLabel(selectedMonthRange.start),
+    selectedDate: selectedDayRange.dateValue,
+    availableEmployees,
+    availableBauleiter,
+    availableProjects,
+    totalHours,
+    activeEmployees,
+    averageHoursPerEmployee: activeEmployees ? totalHours / activeEmployees : 0,
+    workdays: new Set(selectedEntries.map((entry) => entry.entryDate)).size,
+    entryCount: selectedEntries.length,
+    topEmployee: rankMap(employeeMap, 8)[0],
+    busiestDay: computeSmapOneBusiestDay(selectedEntries),
+    employeeLeaderboard: rankMap(employeeMap, 8),
+    bauleiterLeaderboard: rankMap(bauleiterMap, 6),
+    projectLeaderboard: rankMap(projectMap, 6),
+    sourceLeaderboard: rankMap(sourceMap, 6),
+    monthlyTrend:
+      periodMode === "day"
+        ? buildSmapOneDailyTrend(
+            filteredScopedEntries,
+            Array.from({ length: 7 }, (_, index) => {
+              const date = new Date(rangeStart);
+              date.setDate(rangeStart.getDate() + index - 6);
+              return date;
+            })
+          )
+        : buildSmapOneMonthlyTrend(
+            filteredScopedEntries,
+            Array.from({ length: 6 }, (_, index) => addMonths(selectedMonthRange.start, index - 5))
+          )
+  };
 }
 
 export async function getInvoiceFilterOptions(scope: DataScope = {}): Promise<FilterOptions> {

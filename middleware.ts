@@ -6,7 +6,9 @@ export const config = {
     "/btr-system/:path*",
     "/rechnungen/:path*",
     "/transportbericht/:path*",
-    "/tagesbericht/:path*"
+    "/tagesbericht/:path*",
+    "/geocapture/:path*",
+    "/smapone/:path*"
   ]
 };
 

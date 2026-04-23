@@ -241,11 +241,35 @@ export interface GeoCaptureAnalytics {
   monthlyTrend: GeoCaptureTrendPoint[];
 }
 
+export interface SmapOneAnalytics {
+  periodMode: "month" | "day";
+  selectedLabel: string;
+  selectedMonth: string;
+  selectedMonthLabel: string;
+  selectedDate?: string;
+  availableEmployees: string[];
+  availableBauleiter: string[];
+  availableProjects: string[];
+  totalHours: number;
+  activeEmployees: number;
+  averageHoursPerEmployee: number;
+  workdays: number;
+  entryCount: number;
+  topEmployee?: GeoCaptureRankingItem;
+  busiestDay?: GeoCaptureDailyPeak;
+  employeeLeaderboard: GeoCaptureRankingItem[];
+  bauleiterLeaderboard: GeoCaptureRankingItem[];
+  projectLeaderboard: GeoCaptureRankingItem[];
+  sourceLeaderboard: GeoCaptureRankingItem[];
+  monthlyTrend: GeoCaptureTrendPoint[];
+}
+
 export interface GeoCaptureAnalyticsFilters {
   month?: string;
   date?: string;
   periodMode?: "month" | "day";
   employeeName?: string;
+  bauleiter?: string;
   projectNumbers?: string[];
   isAdmin?: boolean;
   userName?: string;
