@@ -312,8 +312,8 @@ export function IncomingInvoicesPage() {
         <MasterList
           title="Rechnungsliste"
           count={response?.data.length ?? 0}
-          className="xl:min-h-0 xl:max-h-[calc(100vh-11rem)]"
-          contentClassName="xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-2"
+          className="xl:h-[calc(100vh+20rem)] xl:min-h-0"
+          contentClassName="xl:min-h-0 xl:h-[calc(100vh+14rem)] xl:overflow-y-auto xl:pr-2"
         >
           {loading ? (
             <>
@@ -326,7 +326,6 @@ export function IncomingInvoicesPage() {
               <ListCard
                 key={invoice.id}
                 active={invoice.id === selectedId}
-                className="min-h-[250px]"
                 title={invoice.supplierName}
                 subtitle={`${invoice.invoiceNumber} | ${invoice.lvNumber}`}
                 meta={<StatusBadge value={invoice.passt} />}

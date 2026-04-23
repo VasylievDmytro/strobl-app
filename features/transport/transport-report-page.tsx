@@ -296,8 +296,8 @@ export function TransportReportPage() {
         <MasterList
           title="Berichte"
           count={response?.data.length ?? 0}
-          className="xl:max-h-[calc(100vh-2rem)] xl:min-h-0"
-          contentClassName="xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto xl:pr-2"
+          className="xl:h-[calc(100vh+34rem)] xl:min-h-0"
+          contentClassName="xl:h-[calc(100vh+28rem)] xl:overflow-y-auto xl:pr-2"
         >
           {loadingList ? (
             <>
@@ -310,7 +310,6 @@ export function TransportReportPage() {
               <ListCard
                 key={report.id}
                 active={report.id === selectedId}
-                className="min-h-[320px]"
                 title={report.projectLabel}
                 subtitle={report.lvNumber}
                 onClick={() => setSelectedId(report.id)}

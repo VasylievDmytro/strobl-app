@@ -29,11 +29,11 @@ export function PageTitle({
           </p>
         ) : null}
         <div className="space-y-2">
-          <h1 className="max-w-5xl text-balance text-[clamp(1.85rem,7.4vw,3.2rem)] leading-[0.97] text-ink-900 2xl:text-[clamp(2rem,9vw,3.75rem)]">
+          <h1 className="max-w-5xl text-balance text-[clamp(2rem,9vw,3.75rem)] leading-[0.96] text-ink-900">
             {title}
           </h1>
           {description ? (
-            <p className="max-w-4xl text-[0.94rem] leading-7 md:text-[0.98rem] 2xl:text-base">{description}</p>
+            <p className="max-w-4xl text-[0.96rem] leading-7 md:text-base">{description}</p>
           ) : null}
         </div>
       </div>

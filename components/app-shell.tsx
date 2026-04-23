@@ -21,15 +21,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div
         className={cn(
-          "min-h-screen px-4 py-4 transition-all duration-300 md:px-5 lg:px-6 lg:py-4 2xl:py-5",
-          collapsed ? "lg:ml-[104px] 2xl:ml-[120px]" : "lg:ml-[304px] 2xl:ml-[360px]"
+          "min-h-screen px-4 py-4 transition-all duration-300 md:px-6 lg:py-5",
+          collapsed ? "lg:ml-[120px]" : "lg:ml-[360px]"
         )}
       >
-        <div className="mx-auto max-w-[1640px] 2xl:max-w-[1720px]">
+        <div className="mx-auto max-w-[1720px]">
           <UserBar />
           <TopHeader onOpenSidebar={() => setMobileOpen(true)} />
-          <main className="space-y-5 2xl:space-y-6">{children}</main>
-          <footer className="mt-7 pb-7 2xl:mt-8 2xl:pb-8">
+          <main className="space-y-6">{children}</main>
+          <footer className="mt-8 pb-8">
             <div className="surface-muted flex items-center justify-between gap-4 px-4 py-3 text-sm text-ink-500 md:px-5">
               <p>Projekt entwickelt von Dmytro Vasyliev.</p>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink-400">
