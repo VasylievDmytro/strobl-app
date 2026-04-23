@@ -1,0 +1,12 @@
+.next
+node_modules
+dist
+coverage
+.env.local
+.env.*.local
+.tageseinteilung-cache
+tmp-tageseinteilung.xlsx
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
