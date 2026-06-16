@@ -303,3 +303,43 @@ export interface FilterOptions {
   lvNumbers: string[];
   reportTypes?: string[];
 }
+
+export interface ProjectTimeSourceSummary {
+  hours: number;
+  entries: number;
+  employees: number;
+  lastEntryDate?: string;
+}
+
+export interface SharePointProjectItem {
+  id: string;
+  name: string;
+  webUrl?: string;
+  parentWebUrl?: string;
+  lastModifiedDateTime?: string;
+  folder: boolean;
+  size?: number;
+  children?: SharePointProjectItem[];
+}
+
+export interface ProjectSummary {
+  lvNumber: string;
+  projectLabel: string;
+  address?: string;
+  client?: string;
+  bauleiter?: string;
+  lastActivityDate?: string;
+  invoices: IncomingInvoice[];
+  dailyReports: DailyReport[];
+  transportReports: TransportReport[];
+  sharePointItems: SharePointProjectItem[];
+  smapOne: ProjectTimeSourceSummary;
+  geoCapture: ProjectTimeSourceSummary;
+  totals: {
+    invoiceAmount: number;
+    openInvoices: number;
+    reports: number;
+    documents: number;
+    workHours: number;
+  };
+}

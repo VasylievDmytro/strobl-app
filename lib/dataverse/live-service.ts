@@ -13,6 +13,7 @@ import type {
   HomeSummary,
   IncomingInvoice,
   InvoiceFilters,
+  ProjectTimeSourceSummary,
   ReportFilters,
   SmapOneAnalytics,
   TourRecord,
@@ -831,6 +832,43 @@ async function getSmapOneEntries(dateFrom: string, dateTo: string, projectNumber
     });
 
   return [...dailyEntries, ...transportEntries];
+}
+
+function summarizeTimeEntries(
+  entries: Array<{ employeeName: string; entryDate: string; workHours: number }>
+): ProjectTimeSourceSummary {
+  const lastEntryDate = entries
+    .map((entry) => entry.entryDate)
+    .filter(Boolean)
+    .sort((left, right) => +new Date(right) - +new Date(left))[0];
+
+  return {
+    hours: entries.reduce((sum, entry) => sum + entry.workHours, 0),
+    entries: entries.length,
+    employees: new Set(entries.map((entry) => entry.employeeName).filter(Boolean)).size,
+    lastEntryDate
+  };
+}
+
+export async function getLiveProjectTimeSummary(
+  lvNumber: string,
+  dateFrom: string,
+  dateTo: string
+) {
+  const projectNumbers = [lvNumber].filter(Boolean);
+  const [smapOneEntries, geoCaptureEntries] = await Promise.all([
+    getSmapOneEntries(dateFrom, dateTo, projectNumbers),
+    getGeoCaptureEntries(dateFrom, dateTo)
+  ]);
+
+  return {
+    smapOne: summarizeTimeEntries(
+      smapOneEntries.filter((entry) => matchesSmapOneProjectFilter(entry, projectNumbers))
+    ),
+    geoCapture: summarizeTimeEntries(
+      geoCaptureEntries.filter((entry) => matchesProjectFilter(entry, projectNumbers))
+    )
+  };
 }
 
 function matchesProjectFilter(entry: GeoCaptureEntry, projectNumbers: string[]) {

@@ -29,6 +29,7 @@ import {
   getLiveInvoiceAccess,
   getLiveIncomingInvoices,
   getLiveInvoiceFilterOptions,
+  getLiveProjectTimeSummary,
   getLiveTransportReportAccess,
   getLiveTransportFilterOptions,
   getLiveTransportReportDetails,
@@ -42,6 +43,7 @@ import type {
   GeoCaptureAnalyticsFilters,
   HomeSummary,
   InvoiceFilters,
+  ProjectTimeSourceSummary,
   ReportFilters,
   SmapOneAnalytics,
   TransportDetailBundle
@@ -573,6 +575,70 @@ export async function getSmapOneAnalytics(
             filteredScopedEntries,
             Array.from({ length: 6 }, (_, index) => addMonths(selectedMonthRange.start, index - 5))
           )
+  };
+}
+
+function emptyTimeSummary(): ProjectTimeSourceSummary {
+  return {
+    hours: 0,
+    entries: 0,
+    employees: 0
+  };
+}
+
+function getLastTwelveMonthsRange() {
+  const today = new Date();
+  const dateFrom = new Date(today);
+  dateFrom.setMonth(dateFrom.getMonth() - 12);
+
+  return {
+    dateFrom: formatDateInputValue(dateFrom),
+    dateTo: formatDateInputValue(today)
+  };
+}
+
+export async function getProjectTimeSummary(lvNumber: string): Promise<{
+  smapOne: ProjectTimeSourceSummary;
+  geoCapture: ProjectTimeSourceSummary;
+}> {
+  const normalizedLv = lvNumber.trim();
+  if (!normalizedLv) {
+    return {
+      smapOne: emptyTimeSummary(),
+      geoCapture: emptyTimeSummary()
+    };
+  }
+
+  if (isLiveDataverseEnabled()) {
+    const range = getLastTwelveMonthsRange();
+    return getLiveProjectTimeSummary(normalizedLv, range.dateFrom, range.dateTo);
+  }
+
+  await wait(180);
+
+  const range = getLastTwelveMonthsRange();
+  const fromTime = new Date(range.dateFrom).getTime();
+  const toTime = new Date(range.dateTo).getTime();
+  const lvValues = [normalizedLv];
+  const smapOneEntries = getMockSmapOneEntries().filter((entry) => {
+    const entryTime = new Date(entry.entryDate).getTime();
+    return (
+      entryTime >= fromTime &&
+      entryTime <= toTime &&
+      matchesProjectNumber(entry.projectNumber, lvValues)
+    );
+  });
+
+  return {
+    smapOne: {
+      hours: smapOneEntries.reduce((sum, entry) => sum + entry.workHours, 0),
+      entries: smapOneEntries.length,
+      employees: new Set(smapOneEntries.map((entry) => entry.employeeName).filter(Boolean)).size,
+      lastEntryDate: smapOneEntries
+        .map((entry) => entry.entryDate)
+        .sort((left, right) => +new Date(right) - +new Date(left))[0]
+    },
+    geoCapture: emptyTimeSummary()
   };
 }
 

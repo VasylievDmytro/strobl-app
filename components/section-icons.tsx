@@ -54,6 +54,25 @@ export function BtrSectionIcon(props: IconProps) {
   );
 }
 
+export function BaustellenSectionIcon(props: IconProps) {
+  return (
+    <SvgBase {...props}>
+      <path d="M12 24a4 4 0 0 1 4-4h32a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V24Z" />
+      <path d="M20 20v-5a4 4 0 0 1 4-4h16a4 4 0 0 1 4 4v5h-5v-4H25v4h-5Z" />
+      <rect x="19" y="30" width="12" height="5" rx="2" fill="white" opacity=".92" />
+      <rect x="19" y="40" width="20" height="5" rx="2" fill="white" opacity=".92" />
+      <circle cx="45" cy="35" r="7" fill="white" opacity=".96" />
+      <path
+        d="m49.5 39.5 5 5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="4"
+      />
+    </SvgBase>
+  );
+}
+
 export function TransportSectionIcon(props: IconProps) {
   return (
     <SvgBase {...props}>
