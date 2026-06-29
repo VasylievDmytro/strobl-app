@@ -10,6 +10,7 @@ import {
   TrendingUp
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ProjectSearchInput } from "@/components/filters/project-search-input";
 import { PageTitle } from "@/components/page-title";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -20,6 +21,7 @@ import type {
   GeoCaptureMonthOption,
   GeoCaptureRankingItem,
   GeoCaptureTrendPoint,
+  ProjectSearchOption,
   SmapOneAnalytics,
   UserAccessScope
 } from "@/lib/dataverse/models";
@@ -36,6 +38,7 @@ function normalizeAnalytics(analytics: SmapOneAnalytics): SmapOneAnalytics {
     availableEmployees: analytics.availableEmployees ?? [],
     availableBauleiter: analytics.availableBauleiter ?? [],
     availableProjects: analytics.availableProjects ?? [],
+    projectSearchOptions: analytics.projectSearchOptions ?? [],
     employeeLeaderboard: analytics.employeeLeaderboard ?? [],
     bauleiterLeaderboard: analytics.bauleiterLeaderboard ?? [],
     projectLeaderboard: analytics.projectLeaderboard ?? [],
@@ -83,6 +86,15 @@ function hoursLabel(value: number) {
   return `${formatQuantity(value)} h`;
 }
 
+function buildProjectSuggestions(projects: string[], options: ProjectSearchOption[]) {
+  const addresses = options.map((option) => option.address).filter(Boolean);
+  const labels = options.map((option) => option.label);
+
+  return Array.from(new Set([...projects, ...addresses, ...labels])).sort((left, right) =>
+    left.localeCompare(right, "de")
+  );
+}
+
 export function SmapOneDashboard() {
   const monthOptions = useMemo(() => buildMonthOptions(6), []);
   const todayValue = useMemo(() => formatDateValue(new Date()), []);
@@ -97,6 +109,14 @@ export function SmapOneDashboard() {
   const [error, setError] = useState<string | null>(null);
   const analytics = response?.analytics ?? null;
   const access = response?.access;
+  const projectSearchOptions = useMemo(
+    () =>
+      buildProjectSuggestions(
+        analytics?.availableProjects ?? [],
+        analytics?.projectSearchOptions ?? []
+      ),
+    [analytics?.availableProjects, analytics?.projectSearchOptions]
+  );
 
   const projectNumbers = useMemo(
     () =>
@@ -250,29 +270,14 @@ export function SmapOneDashboard() {
           </select>
         </label>
 
-        <label className="space-y-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
-            Projektnummer
-          </span>
-          <div className="space-y-2">
-            <p className="text-xs leading-5 text-ink-400">
-              Beispiel: 260014-104, 250085-103
-            </p>
-            <input
-              type="text"
-              className="input-shell"
-              placeholder="Mehrere Projektnummern mit Komma trennen"
-              list="smapone-projects"
-              value={projectInput}
-              onChange={(event) => setProjectInput(event.target.value)}
-            />
-            <datalist id="smapone-projects">
-              {(analytics?.availableProjects ?? []).map((project) => (
-                <option key={project} value={project} />
-              ))}
-            </datalist>
-          </div>
-        </label>
+        <ProjectSearchInput
+          label="Projekt / Baustellenadresse"
+          hint="Beispiel: 260014-104, Starnberg oder Adresse aus der Liste"
+          placeholder="Projekt oder Adresse eingeben"
+          value={projectInput}
+          suggestions={projectSearchOptions}
+          onChange={setProjectInput}
+        />
 
         <div className="grid">
           <button

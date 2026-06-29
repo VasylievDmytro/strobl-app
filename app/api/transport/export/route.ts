@@ -174,6 +174,7 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => ({}))) as {
     lvNumbers?: string[];
+    vehicleLabels?: string[];
     bauleiter?: string;
     dateFrom?: string;
     dateTo?: string;
@@ -189,6 +190,7 @@ export async function POST(request: NextRequest) {
 
   const payload = {
     lvList: (body.lvNumbers ?? []).filter(Boolean).join(";"),
+    lkwList: (body.vehicleLabels ?? []).filter(Boolean).join(";"),
     bauleiter: effectiveBauleiter,
     dateFrom: body.dateFrom || (!hasExplicitDateFilter ? defaultRange.dateFrom : ""),
     dateTo: body.dateTo || (!hasExplicitDateFilter ? defaultRange.dateTo : ""),

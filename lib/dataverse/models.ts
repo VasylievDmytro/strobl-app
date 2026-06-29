@@ -5,6 +5,7 @@ export interface IncomingInvoice {
   supplierName: string;
   invoiceNumber: string;
   lvNumber: string;
+  projectAddress?: string;
   bauleiter: string;
   bookingDate: string;
   passt: boolean;
@@ -226,6 +227,7 @@ export interface GeoCaptureAnalytics {
   selectedDate?: string;
   availableEmployees: string[];
   availableProjects: string[];
+  projectSearchOptions: ProjectSearchOption[];
   totalHours: number;
   activeEmployees: number;
   averageHoursPerEmployee: number;
@@ -250,6 +252,7 @@ export interface SmapOneAnalytics {
   availableEmployees: string[];
   availableBauleiter: string[];
   availableProjects: string[];
+  projectSearchOptions: ProjectSearchOption[];
   totalHours: number;
   activeEmployees: number;
   averageHoursPerEmployee: number;
@@ -290,17 +293,27 @@ export interface InvoiceFilters {
   passt?: StatusMode;
 }
 
+export interface ProjectSearchOption {
+  lvNumber: string;
+  address: string;
+  label: string;
+}
+
 export interface ReportFilters {
   dateFrom?: string;
   dateTo?: string;
   bauleiter?: string;
   lvNumbers?: string[];
+  vehicleLabels?: string[];
   reportType?: string;
 }
 
 export interface FilterOptions {
   bauleiter: string[];
   lvNumbers: string[];
+  vehicleLabels?: string[];
+  supplierSearchOptions?: string[];
+  projectSearchOptions?: ProjectSearchOption[];
   reportTypes?: string[];
 }
 

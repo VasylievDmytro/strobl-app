@@ -44,6 +44,7 @@ import type {
   HomeSummary,
   InvoiceFilters,
   ProjectTimeSourceSummary,
+  ProjectSearchOption,
   ReportFilters,
   SmapOneAnalytics,
   TransportDetailBundle
@@ -80,7 +81,7 @@ function startsWithIgnoreCase(value: string, search?: string) {
     return true;
   }
 
-  return value.toLowerCase().startsWith(search.trim().toLowerCase());
+  return normalizeSearchValue(value).startsWith(normalizeSearchValue(search));
 }
 
 function includesIgnoreCase(value: string, search?: string) {
@@ -88,7 +89,123 @@ function includesIgnoreCase(value: string, search?: string) {
     return true;
   }
 
-  return value.toLowerCase().includes(search.trim().toLowerCase());
+  return normalizeSearchValue(value).includes(normalizeSearchValue(search));
+}
+
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+function getProjectSearchOptions(lvNumbers: string[], scope: DataScope = {}): ProjectSearchOption[] {
+  const allowedLvNumbers = new Set(lvNumbers.filter(Boolean));
+  const reports = [...dailyReports, ...transportReports].filter(
+    (report) =>
+      allowedLvNumbers.has(report.lvNumber) &&
+      (!scope.bauleiter || report.bauleiter === scope.bauleiter)
+  );
+  const byLvNumber = new Map<string, ProjectSearchOption>();
+
+  for (const report of reports) {
+    if (!report.lvNumber || byLvNumber.has(report.lvNumber)) {
+      continue;
+    }
+
+    byLvNumber.set(report.lvNumber, {
+      lvNumber: report.lvNumber,
+      address: report.address,
+      label: [report.lvNumber, report.address].filter(Boolean).join(" | ")
+    });
+  }
+
+  return Array.from(byLvNumber.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "de")
+  );
+}
+
+function getReportProjectSearchOptions(
+  reports: Array<{ lvNumber: string; address: string }>
+): ProjectSearchOption[] {
+  const byLvNumber = new Map<string, ProjectSearchOption>();
+
+  for (const report of reports) {
+    if (!report.lvNumber || byLvNumber.has(report.lvNumber)) {
+      continue;
+    }
+
+    byLvNumber.set(report.lvNumber, {
+      lvNumber: report.lvNumber,
+      address: report.address,
+      label: [report.lvNumber, report.address].filter(Boolean).join(" | ")
+    });
+  }
+
+  return Array.from(byLvNumber.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "de")
+  );
+}
+
+function invoiceMatchesProjectSearch(
+  invoice: { lvNumber: string },
+  search: string | undefined,
+  projectOptions: ProjectSearchOption[]
+) {
+  if (!search) {
+    return true;
+  }
+
+  const matchingLvNumbers = new Set(
+    projectOptions
+      .filter(
+        (option) =>
+          startsWithIgnoreCase(option.lvNumber, search) ||
+          startsWithIgnoreCase(option.address, search) ||
+          startsWithIgnoreCase(option.label, search)
+      )
+      .map((option) => option.lvNumber)
+  );
+
+  return startsWithIgnoreCase(invoice.lvNumber, search) || matchingLvNumbers.has(invoice.lvNumber);
+}
+
+function attachProjectAddresses<T extends { lvNumber: string }>(
+  invoices: T[],
+  projectOptions: ProjectSearchOption[]
+) {
+  const addressByLvNumber = new Map(
+    projectOptions.map((option) => [option.lvNumber, option.address])
+  );
+
+  return invoices.map((invoice) => ({
+    ...invoice,
+    projectAddress: addressByLvNumber.get(invoice.lvNumber) || undefined
+  }));
+}
+
+function reportMatchesProjectSearch(
+  report: { lvNumber: string; address: string },
+  values?: string[]
+) {
+  if (!values?.length) {
+    return true;
+  }
+
+  return values.some(
+    (value) =>
+      includesIgnoreCase(report.lvNumber, value) ||
+      includesIgnoreCase(report.address, value)
+  );
+}
+
+function reportMatchesVehicleSearch(report: { vehicleLabel?: string }, values?: string[]) {
+  if (!values?.length) {
+    return true;
+  }
+
+  return values.some((value) => includesIgnoreCase(report.vehicleLabel ?? "", value));
 }
 
 export async function getHomeSummary(scope: DataScope = {}): Promise<HomeSummary> {
@@ -306,17 +423,54 @@ function computeSmapOneBusiestDay(entries: SmapOneTimeEntry[]) {
   };
 }
 
-function matchesProjectNumber(value: string | undefined, projectNumbers: string[]) {
+function matchesProjectNumber(
+  value: string | undefined,
+  projectNumbers: string[],
+  address?: string
+) {
   if (!projectNumbers.length) {
     return true;
   }
 
-  const normalized = (value ?? "").toLowerCase();
-  if (!normalized) {
+  const candidates = [
+    value ?? "",
+    address ?? "",
+    [value, address].filter(Boolean).join(" | ")
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+
+  if (!candidates.length) {
     return false;
   }
 
-  return projectNumbers.some((project) => normalized.includes(project.toLowerCase()));
+  return projectNumbers.some((project) => {
+    const normalizedProject = normalizeSearchValue(project);
+    return candidates.some((candidate) => candidate.includes(normalizedProject));
+  });
+}
+
+function getTimeProjectSearchOptions(
+  entries: Array<{ projectNumber?: string; costCenter?: string; address?: string }>
+): ProjectSearchOption[] {
+  const byProject = new Map<string, ProjectSearchOption>();
+
+  for (const entry of entries) {
+    const projectNumber = entry.projectNumber || entry.costCenter || "";
+    if (!projectNumber || byProject.has(projectNumber)) {
+      continue;
+    }
+
+    byProject.set(projectNumber, {
+      lvNumber: projectNumber,
+      address: entry.address ?? "",
+      label: [projectNumber, entry.address].filter(Boolean).join(" | ")
+    });
+  }
+
+  return Array.from(byProject.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "de")
+  );
 }
 
 function formatSmapOneEmployeeName(lastName?: string, firstName?: string) {
@@ -378,6 +532,23 @@ export async function getGeoCaptureAnalytics(filters: GeoCaptureAnalyticsFilters
   await wait(220);
 
   const selectedMonth = filters.month || getCurrentMonthValue();
+  const fallbackProjectSearchOptions: ProjectSearchOption[] = [
+    {
+      lvNumber: "250899-101",
+      address: "Kosthofstraße 10+10a in Gilching",
+      label: "250899-101 | Kosthofstraße 10+10a in Gilching"
+    },
+    {
+      lvNumber: "250878-101",
+      address: "Martinsholzer Straße - Pumpwerk 22",
+      label: "250878-101 | Martinsholzer Straße - Pumpwerk 22"
+    },
+    {
+      lvNumber: "0-Hof",
+      address: "Lager Firma Strobl",
+      label: "0-Hof | Lager Firma Strobl"
+    }
+  ];
 
   const fallback: GeoCaptureAnalytics = {
     periodMode: filters.periodMode ?? "month",
@@ -391,6 +562,7 @@ export async function getGeoCaptureAnalytics(filters: GeoCaptureAnalyticsFilters
       "Michael Strobl"
     ],
     availableProjects: ["250899-101", "250878-101", "0-Hof"],
+    projectSearchOptions: fallbackProjectSearchOptions,
     totalHours: 128.4,
     activeEmployees: 6,
     averageHoursPerEmployee: 21.4,
@@ -481,6 +653,7 @@ export async function getSmapOneAnalytics(
   const availableProjects = Array.from(
     new Set(periodEntries.map((entry) => entry.projectNumber).filter(Boolean))
   ).sort((left, right) => left!.localeCompare(right!, "de")) as string[];
+  const projectSearchOptions = getTimeProjectSearchOptions(periodEntries);
 
   const employeeName = filters.employeeName?.trim();
   const bauleiter = filters.bauleiter?.trim();
@@ -495,7 +668,7 @@ export async function getSmapOneAnalytics(
       return false;
     }
 
-    return matchesProjectNumber(entry.projectNumber, projectNumbers);
+    return matchesProjectNumber(entry.projectNumber, projectNumbers, entry.address);
   });
 
   const filteredScopedEntries = scopedEntries.filter((entry) => {
@@ -507,7 +680,7 @@ export async function getSmapOneAnalytics(
       return false;
     }
 
-    return matchesProjectNumber(entry.projectNumber, projectNumbers);
+    return matchesProjectNumber(entry.projectNumber, projectNumbers, entry.address);
   });
 
   const employeeMap = new Map<string, RankedMetric>();
@@ -550,6 +723,7 @@ export async function getSmapOneAnalytics(
     availableEmployees,
     availableBauleiter,
     availableProjects,
+    projectSearchOptions,
     totalHours,
     activeEmployees,
     averageHoursPerEmployee: activeEmployees ? totalHours / activeEmployees : 0,
@@ -655,7 +829,16 @@ export async function getInvoiceFilterOptions(scope: DataScope = {}): Promise<Fi
 
   return {
     bauleiter: Array.from(new Set(scopedInvoices.map((item) => item.bauleiter))).sort(),
-    lvNumbers: Array.from(new Set(scopedInvoices.map((item) => item.lvNumber))).sort()
+    lvNumbers: Array.from(new Set(scopedInvoices.map((item) => item.lvNumber))).sort(),
+    supplierSearchOptions: Array.from(
+      new Set(
+        scopedInvoices.flatMap((item) => [item.supplierName, item.invoiceNumber]).filter(Boolean)
+      )
+    ).sort((left, right) => left.localeCompare(right, "de")),
+    projectSearchOptions: getProjectSearchOptions(
+      Array.from(new Set(scopedInvoices.map((item) => item.lvNumber))),
+      scope
+    )
   };
 }
 
@@ -665,20 +848,24 @@ export async function getIncomingInvoices(filters: InvoiceFilters) {
   }
 
   await wait();
+  const projectSearchOptions = getProjectSearchOptions(
+    Array.from(new Set(incomingInvoices.map((item) => item.lvNumber))),
+    { bauleiter: filters.bauleiter }
+  );
 
-  return incomingInvoices
+  return attachProjectAddresses(incomingInvoices, projectSearchOptions)
     .filter((invoice) => isWithinDateRange(invoice.bookingDate, filters.dateFrom, filters.dateTo))
-    .filter((invoice) => startsWithIgnoreCase(invoice.supplierName, filters.supplier))
+    .filter(
+      (invoice) =>
+        startsWithIgnoreCase(invoice.supplierName, filters.supplier) ||
+        startsWithIgnoreCase(invoice.invoiceNumber, filters.supplier)
+    )
     .filter(
       (invoice) =>
         !filters.bauleiter ||
         invoice.bauleiter.toLowerCase() === filters.bauleiter.trim().toLowerCase()
     )
-    .filter(
-      (invoice) =>
-        includesIgnoreCase(invoice.lvNumber, filters.search) ||
-        includesIgnoreCase(invoice.invoiceNumber, filters.search)
-    )
+    .filter((invoice) => invoiceMatchesProjectSearch(invoice, filters.search, projectSearchOptions))
     .filter((invoice) => {
       if (!filters.passt || filters.passt === "all") {
         return true;
@@ -702,7 +889,11 @@ export async function getTransportFilterOptions(scope: DataScope = {}): Promise<
 
   return {
     bauleiter: Array.from(new Set(scopedReports.map((item) => item.bauleiter))).sort(),
-    lvNumbers: Array.from(new Set(scopedReports.map((item) => item.lvNumber))).sort()
+    lvNumbers: Array.from(new Set(scopedReports.map((item) => item.lvNumber))).sort(),
+    vehicleLabels: Array.from(
+      new Set(scopedReports.map((item) => item.vehicleLabel).filter(Boolean))
+    ).sort((left, right) => left!.localeCompare(right!, "de")) as string[],
+    projectSearchOptions: getReportProjectSearchOptions(scopedReports)
   };
 }
 
@@ -716,11 +907,8 @@ export async function getTransportReports(filters: ReportFilters) {
   return transportReports
     .filter((report) => isWithinDateRange(report.date, filters.dateFrom, filters.dateTo))
     .filter((report) => !filters.bauleiter || report.bauleiter === filters.bauleiter)
-    .filter(
-      (report) =>
-        !filters.lvNumbers?.length ||
-        filters.lvNumbers.some((value) => includesIgnoreCase(report.lvNumber, value))
-    )
+    .filter((report) => reportMatchesProjectSearch(report, filters.lvNumbers))
+    .filter((report) => reportMatchesVehicleSearch(report, filters.vehicleLabels))
     .sort((left, right) => +new Date(right.date) - +new Date(left.date));
 }
 
@@ -779,6 +967,7 @@ export async function getDailyFilterOptions(scope: DataScope = {}): Promise<Filt
   return {
     bauleiter: Array.from(new Set(scopedReports.map((item) => item.bauleiter))).sort(),
     lvNumbers: Array.from(new Set(scopedReports.map((item) => item.lvNumber))).sort(),
+    projectSearchOptions: getReportProjectSearchOptions(scopedReports),
     reportTypes: Array.from(
       new Set(scopedReports.map((item) => item.reportType ?? item.reportName))
     ).sort()
@@ -798,11 +987,7 @@ export async function getDailyReports(filters: ReportFilters) {
     .filter(
       (report) => !filters.reportType || (report.reportType ?? report.reportName) === filters.reportType
     )
-    .filter(
-      (report) =>
-        !filters.lvNumbers?.length ||
-        filters.lvNumbers.some((value) => includesIgnoreCase(report.lvNumber, value))
-    )
+    .filter((report) => reportMatchesProjectSearch(report, filters.lvNumbers))
     .sort((left, right) => +new Date(right.date) - +new Date(left.date));
 }
 

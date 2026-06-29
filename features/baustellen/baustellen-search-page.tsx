@@ -17,16 +17,36 @@ import {
   Search
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ProjectSearchInput } from "@/components/filters/project-search-input";
 import { PageTitle } from "@/components/page-title";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonLoader } from "@/components/ui/skeleton-loader";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { fetchJson } from "@/lib/api-client";
-import type { ProjectSummary, SharePointProjectItem } from "@/lib/dataverse/models";
+import type {
+  ProjectSearchOption,
+  ProjectSummary,
+  SharePointProjectItem
+} from "@/lib/dataverse/models";
 import { formatCurrency, formatDate, formatQuantity } from "@/lib/format";
 
 interface ProjectSummaryResponse {
   data: ProjectSummary;
+}
+
+interface BaustellenOptionsResponse {
+  lvNumbers: string[];
+  projectSearchOptions: ProjectSearchOption[];
+}
+
+function buildProjectSuggestions(lvNumbers: string[], options: ProjectSearchOption[]) {
+  const addresses = options.map((option) => option.address).filter(Boolean);
+  const labels = options.map((option) => option.label);
+
+  return Array.from(new Set([...lvNumbers, ...addresses, ...labels])).sort((left, right) =>
+    left.localeCompare(right, "de")
+  );
 }
 
 function StatTile({
@@ -208,8 +228,24 @@ export function BaustellenSearchPage() {
   const [input, setInput] = useState("");
   const [searchedLv, setSearchedLv] = useState("");
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
+  const [options, setOptions] = useState<BaustellenOptionsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchJson<BaustellenOptionsResponse>("/api/baustellen/options")
+      .then(setOptions)
+      .catch(() => setOptions(null));
+  }, []);
+
+  const projectSearchOptions = useMemo(
+    () =>
+      buildProjectSuggestions(
+        options?.lvNumbers ?? [],
+        options?.projectSearchOptions ?? []
+      ),
+    [options?.lvNumbers, options?.projectSearchOptions]
+  );
 
   const timeCards = useMemo(
     () =>
@@ -238,7 +274,7 @@ export function BaustellenSearchPage() {
     event.preventDefault();
     const lv = input.trim();
     if (!lv) {
-      setError("Bitte eine LV-Nummer eingeben.");
+      setError("Bitte eine LV-Nummer oder Baustellenadresse eingeben.");
       setSummary(null);
       return;
     }
@@ -286,20 +322,19 @@ export function BaustellenSearchPage() {
         description="Zentrale Sicht auf Rechnungen, SharePoint-Ordner, Tagesberichte, Transportberichte sowie Arbeitszeiten aus SmapOne und GeoCapture."
       />
 
-      <section className="surface-card p-4">
+      <section className="surface-card relative z-[80] overflow-visible p-4">
         <form className="grid gap-3 lg:grid-cols-[1fr_auto]" onSubmit={handleSubmit}>
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-ink-400" />
-            <input
-              className="input-shell h-14 pl-12 text-base"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="LV-Nummer eingeben, z. B. 260263-101"
-            />
-          </label>
+          <ProjectSearchInput
+            label="LV / Baustellenadresse"
+            hint="Beispiel: 260014-104, Starnberg oder Adresse aus der Liste"
+            placeholder="LV oder Adresse eingeben"
+            value={input}
+            suggestions={projectSearchOptions}
+            onChange={setInput}
+          />
           <button
             type="submit"
-            className="inline-flex h-14 items-center justify-center gap-2 rounded-[1.15rem] bg-strobl-700 px-6 text-sm font-semibold text-white shadow-[0_18px_34px_-24px_rgba(8,88,163,0.55)] transition hover:bg-strobl-800"
+            className="inline-flex h-14 items-center justify-center gap-2 self-end rounded-[1.15rem] bg-strobl-700 px-6 text-sm font-semibold text-white shadow-[0_18px_34px_-24px_rgba(8,88,163,0.55)] transition hover:bg-strobl-800"
             disabled={loading}
           >
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -334,7 +369,7 @@ export function BaustellenSearchPage() {
       ) : !summary ? (
         <EmptyState
           title="Bereit fuer die LV Suche"
-          description="Gib eine LV-Nummer ein, um die zusammengefuehrten Daten der Baustelle zu laden."
+          description="Gib eine LV-Nummer oder Baustellenadresse ein, um die zusammengefuehrten Daten der Baustelle zu laden."
         />
       ) : (
         <div className="space-y-6">
@@ -454,7 +489,7 @@ export function BaustellenSearchPage() {
               />
               {summary.invoices.length ? (
                 <div className="space-y-3">
-                  {summary.invoices.slice(0, 8).map((invoice) => (
+                  {summary.invoices.map((invoice) => (
                     <div
                       key={invoice.id}
                       className="rounded-[1.15rem] border border-white/80 bg-white/78 p-4"
@@ -469,7 +504,8 @@ export function BaustellenSearchPage() {
                             {formatMaybeDate(invoice.bookingDate)}
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-start gap-3">
+                        <div className="flex shrink-0 flex-wrap items-start justify-end gap-3">
+                          <StatusBadge value={invoice.passt} trueLabel="OK" falseLabel="Offen" />
                           <p className="pt-1 text-sm font-semibold text-ink-900">
                             {formatCurrency(invoice.amount)}
                           </p>

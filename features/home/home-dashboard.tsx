@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   BarChart3,
+  FolderSearch,
   ClipboardPenLine,
   ReceiptText,
   Sparkles,
@@ -35,6 +36,12 @@ const quickLinks = [
     description: "Projektstatus, Mitarbeiter, Fahrzeuge und Wetter sauber gebündelt.",
     href: "/tagesbericht",
     icon: ClipboardPenLine
+  },
+  {
+    title: "Baustellen",
+    description: "Zentrale LV-Suche mit Rechnungen, Berichten, SharePoint und Arbeitszeiten.",
+    href: "/baustellen",
+    icon: FolderSearch
   },
   {
     title: "GeoCapture",

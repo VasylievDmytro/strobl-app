@@ -35,7 +35,8 @@ export async function GET(request: NextRequest) {
     bauleiter: access.isAdmin
       ? params.get("bauleiter") || undefined
       : access.bauleiter || undefined,
-    lvNumbers: params.getAll("lv")
+    lvNumbers: params.getAll("lv"),
+    vehicleLabels: params.getAll("vehicle")
   };
   const scope: UserAccessScope = {
     isAdmin: access.isAdmin,

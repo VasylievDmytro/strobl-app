@@ -1,6 +1,14 @@
 "use client";
 
-import { Check, CheckCircle2, Circle, ExternalLink, LoaderCircle, RotateCcw } from "lucide-react";
+import {
+  Calculator,
+  Check,
+  CheckCircle2,
+  Circle,
+  ExternalLink,
+  LoaderCircle,
+  RotateCcw
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
 import { SearchInput } from "@/components/filters/search-input";
@@ -111,6 +119,35 @@ export function IncomingInvoicesPage() {
 
     return options;
   }, [isAdmin, lockedBauleiter, response?.options.bauleiter]);
+  const supplierSearchOptions = response?.options.supplierSearchOptions ?? [];
+  const projectSearchOptions = useMemo(() => {
+    const projectOptions = response?.options.projectSearchOptions ?? [];
+    const addresses = projectOptions.map((option) => option.address).filter(Boolean);
+    const labels = projectOptions.map((option) => option.label);
+    const lvNumbers = response?.options.lvNumbers ?? [];
+
+    return Array.from(new Set([...lvNumbers, ...addresses, ...labels])).sort((left, right) =>
+      left.localeCompare(right, "de")
+    );
+  }, [response?.options.lvNumbers, response?.options.projectSearchOptions]);
+  const invoiceSummary = useMemo(() => {
+    const invoices = response?.data ?? [];
+    const supplierNames = Array.from(new Set(invoices.map((invoice) => invoice.supplierName)))
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, "de"));
+    const totalAmount = invoices.reduce((sum, invoice) => sum + invoice.amount, 0);
+
+    return {
+      invoiceCount: invoices.length,
+      supplierLabel:
+        supplierNames.length === 0
+          ? "Keine passenden Rechnungen"
+          : supplierNames.length === 1
+            ? supplierNames[0]
+            : `${supplierNames.length} Lieferanten`,
+      totalAmount
+    };
+  }, [response?.data]);
 
   useEffect(() => {
     if (!selectedInvoice) {
@@ -174,7 +211,7 @@ export function IncomingInvoicesPage() {
       <PageTitle
         eyebrow="Rechnungen"
         title="Eingangsrechnungen"
-        description="Lieferantenrechnungen werden nach Datum, Namen, Bauleiter, LV oder Belegnummer gefiltert und standardmaessig absteigend nach Belegdatum sortiert."
+        description="Lieferantenrechnungen werden nach Datum, Lieferant, Belegnummer, Bauleiter, LV oder Baustellenadresse gefiltert und standardmaessig absteigend nach Belegdatum sortiert."
       />
 
       <section className="surface-card overflow-hidden p-3.5 md:p-4">
@@ -249,11 +286,12 @@ export function IncomingInvoicesPage() {
         <div className="mt-3 grid gap-2.5 xl:grid-cols-[0.95fr_0.8fr_1.25fr]">
           <div className="surface-muted p-3">
             <SearchInput
-              label="Lieferant"
-              placeholder="Anzeigename beginnt mit..."
+              label="Lieferant / Belegnummer"
+              placeholder="Lieferant oder Belegnummer beginnt mit..."
               value={filters.supplier}
               onChange={(value) => setFilters((current) => ({ ...current, supplier: value }))}
               inputClassName="py-2"
+              suggestions={supplierSearchOptions}
             />
           </div>
 
@@ -282,12 +320,47 @@ export function IncomingInvoicesPage() {
 
           <div className="surface-muted p-3">
             <SearchInput
-              label="LV / Belegnummer"
-              placeholder="LVNummer oder Belegnummer..."
+              label="LV / Baustellenadresse"
+              placeholder="LV oder Adresse beginnt mit..."
               value={filters.search}
               onChange={(value) => setFilters((current) => ({ ...current, search: value }))}
               inputClassName="py-2"
+              suggestions={projectSearchOptions}
             />
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2.5 xl:grid-cols-[1fr_220px_220px]">
+          <div className="surface-muted flex min-w-0 items-center gap-3 p-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[1rem] border border-strobl-100 bg-white text-strobl-700">
+              <Calculator className="h-4.5 w-4.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-400">
+                Summe Lieferant
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold text-ink-800 md:text-base">
+                {loading ? "Wird berechnet..." : invoiceSummary.supplierLabel}
+              </p>
+            </div>
+          </div>
+
+          <div className="surface-muted p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-400">
+              Bruttosumme
+            </p>
+            <p className="mt-1 text-lg font-semibold leading-tight text-ink-900 md:text-xl">
+              {loading ? "..." : formatCurrency(invoiceSummary.totalAmount)}
+            </p>
+          </div>
+
+          <div className="surface-muted p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-400">
+              Rechnungen
+            </p>
+            <p className="mt-1 text-lg font-semibold leading-tight text-ink-900 md:text-xl">
+              {loading ? "..." : invoiceSummary.invoiceCount}
+            </p>
           </div>
         </div>
       </section>
@@ -327,7 +400,9 @@ export function IncomingInvoicesPage() {
                 key={invoice.id}
                 active={invoice.id === selectedId}
                 title={invoice.supplierName}
-                subtitle={`${invoice.invoiceNumber} | ${invoice.lvNumber}`}
+                subtitle={[invoice.invoiceNumber, invoice.lvNumber, invoice.projectAddress]
+                  .filter(Boolean)
+                  .join(" | ")}
                 meta={<StatusBadge value={invoice.passt} />}
                 onClick={() => setSelectedId(invoice.id)}
                 footer={

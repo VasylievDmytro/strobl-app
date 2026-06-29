@@ -3,6 +3,7 @@
 import { Download, FileText, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
+import { ProjectSearchInput } from "@/components/filters/project-search-input";
 import { PageTitle } from "@/components/page-title";
 import { DetailPanel } from "@/components/ui/detail-panel";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -37,7 +38,8 @@ const initialFilters: ReportFilters = {
   dateFrom: "",
   dateTo: "",
   bauleiter: "",
-  lvNumbers: []
+  lvNumbers: [],
+  vehicleLabels: []
 };
 
 export function TransportReportPage() {
@@ -62,6 +64,7 @@ export function TransportReportPage() {
     if (filters.dateTo) params.set("dateTo", filters.dateTo);
     if (filters.bauleiter) params.set("bauleiter", filters.bauleiter);
     filters.lvNumbers?.forEach((lv) => params.append("lv", lv));
+    filters.vehicleLabels?.forEach((vehicle) => params.append("vehicle", vehicle));
 
     setLoadingList(true);
     setListError(null);
@@ -86,7 +89,14 @@ export function TransportReportPage() {
         setListError("Die Transportberichte konnten nicht geladen werden.");
       })
       .finally(() => setLoadingList(false));
-  }, [filters.bauleiter, filters.dateFrom, filters.dateTo, filters.lvNumbers, reloadKey]);
+  }, [
+    filters.bauleiter,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.lvNumbers,
+    filters.vehicleLabels,
+    reloadKey
+  ]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -121,6 +131,26 @@ export function TransportReportPage() {
 
     return options;
   }, [isAdmin, lockedBauleiter, response?.options.bauleiter]);
+  const projectSearchOptions = useMemo(() => {
+    const projectOptions = response?.options.projectSearchOptions ?? [];
+    const addresses = projectOptions.map((option) => option.address).filter(Boolean);
+    const labels = projectOptions.map((option) => option.label);
+    const lvNumbers = response?.options.lvNumbers ?? [];
+
+    return Array.from(new Set([...lvNumbers, ...addresses, ...labels])).sort((left, right) =>
+      left.localeCompare(right, "de")
+    );
+  }, [response?.options.lvNumbers, response?.options.projectSearchOptions]);
+  const vehicleLabelOptions = useMemo(() => {
+    const optionLabels = response?.options.vehicleLabels ?? [];
+    const visibleLabels = (response?.data ?? [])
+      .map((report) => report.vehicleLabel)
+      .filter(Boolean) as string[];
+
+    return Array.from(new Set([...optionLabels, ...visibleLabels])).sort((left, right) =>
+      left.localeCompare(right, "de")
+    );
+  }, [response?.data, response?.options.vehicleLabels]);
 
   function handleOpenTransportDocument(url?: string) {
     if (!url) {
@@ -131,11 +161,11 @@ export function TransportReportPage() {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  function parseLvNumbers(value: string) {
+  function parseProjectSearchTerms(value: string) {
     return Array.from(
       new Set(
         value
-          .split(/[\n,;]+/)
+          .split(/[\n,;|]+/)
           .map((item) => item.trim())
           .filter(Boolean)
       )
@@ -155,6 +185,7 @@ export function TransportReportPage() {
         },
         body: JSON.stringify({
           lvNumbers: filters.lvNumbers ?? [],
+          vehicleLabels: filters.vehicleLabels ?? [],
           bauleiter: isAdmin ? filters.bauleiter ?? "" : lockedBauleiter,
           dateFrom: filters.dateFrom ?? "",
           dateTo: filters.dateTo ?? ""
@@ -188,30 +219,53 @@ export function TransportReportPage() {
         description="Master-Detail Ansicht für Transportberichte mit schnellem Filterzugriff auf Bauleiter, Datumsbereich und mehrere LV Nummern."
       />
 
-      <FilterBar className="xl:grid-cols-[1.25fr_0.9fr_1fr_auto]">
+      <FilterBar className="xl:grid-cols-[1.15fr_0.95fr_0.75fr_0.85fr_auto]">
         <DateRangeFilter
           from={filters.dateFrom ?? ""}
           to={filters.dateTo ?? ""}
           onFromChange={(value) => setFilters((current) => ({ ...current, dateFrom: value }))}
           onToChange={(value) => setFilters((current) => ({ ...current, dateTo: value }))}
         />
+        <ProjectSearchInput
+          label="LV / Baustellenadresse"
+          hint="Beispiel: 260014-104, Starnberg oder Adresse aus der Liste"
+          placeholder="LV oder Adresse eingeben"
+          value={lvNumberInput}
+          suggestions={projectSearchOptions}
+          onChange={(value) => {
+            setLvNumberInput(value);
+            setFilters((current) => ({
+              ...current,
+              lvNumbers: parseProjectSearchTerms(value)
+            }));
+          }}
+        />
         <label className="space-y-2">
           <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
-            LV Nummern
+            LKW Nummer
           </span>
           <div className="space-y-2">
-            <p className="text-xs leading-5 text-ink-400">Beispiel: 260014-104, 250085-103</p>
+            <p className="text-xs leading-5 text-ink-400">
+              Beispiel: STA-S 1839
+            </p>
             <input
               type="text"
               className="input-shell"
-              placeholder="Mehrere Nummern mit Komma trennen"
-              value={lvNumberInput}
-              onChange={(event) => {
-                const value = event.target.value;
-                setLvNumberInput(value);
-                setFilters((current) => ({ ...current, lvNumbers: parseLvNumbers(value) }));
-              }}
+              placeholder="LKW Nummer eingeben"
+              list="transport-vehicles"
+              value={(filters.vehicleLabels ?? []).join(", ")}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  vehicleLabels: parseProjectSearchTerms(event.target.value)
+                }))
+              }
             />
+            <datalist id="transport-vehicles">
+              {vehicleLabelOptions.map((vehicle) => (
+                <option key={vehicle} value={vehicle} />
+              ))}
+            </datalist>
           </div>
         </label>
         <label className="space-y-2">

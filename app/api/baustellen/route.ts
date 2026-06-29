@@ -30,6 +30,30 @@ function countSharePointItems(items: ProjectSummary["sharePointItems"]): number 
   );
 }
 
+function parseProjectSearchTerms(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,;|]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function resolveProjectNumber(
+  searchValue: string,
+  reports: Array<{ lvNumber: string; address?: string }>
+) {
+  const searchTerms = parseProjectSearchTerms(searchValue);
+  const normalizedTerms = searchTerms.map((item) => item.toLowerCase());
+  const exactMatch = reports.find((report) =>
+    normalizedTerms.some((term) => report.lvNumber.toLowerCase() === term)
+  );
+
+  return exactMatch?.lvNumber ?? reports.find((report) => report.lvNumber)?.lvNumber ?? searchValue;
+}
+
 export async function GET(request: NextRequest) {
   const accessResult = await requireApiAccess();
   if ("response" in accessResult) {
@@ -44,23 +68,32 @@ export async function GET(request: NextRequest) {
   }
 
   const scopedBauleiter = access.isAdmin ? undefined : access.bauleiter;
+  const searchTerms = parseProjectSearchTerms(lvNumber);
+  const [matchedDailyReports, matchedTransportReports] = await Promise.all([
+    getDailyReports({
+      lvNumbers: searchTerms,
+      bauleiter: scopedBauleiter
+    }),
+    getTransportReports({
+      lvNumbers: searchTerms,
+      bauleiter: scopedBauleiter
+    })
+  ]);
+  const resolvedLvNumber = resolveProjectNumber(lvNumber, [
+    ...matchedDailyReports,
+    ...matchedTransportReports
+  ]);
   const [invoices, dailyReports, transportReports, timeSummary, sharePointResult] =
     await Promise.all([
       getIncomingInvoices({
-        search: lvNumber,
+        search: resolvedLvNumber,
         bauleiter: scopedBauleiter,
         passt: "all"
       }),
-      getDailyReports({
-        lvNumbers: [lvNumber],
-        bauleiter: scopedBauleiter
-      }),
-      getTransportReports({
-        lvNumbers: [lvNumber],
-        bauleiter: scopedBauleiter
-      }),
-      getProjectTimeSummary(lvNumber),
-      findSharePointProjectItems(lvNumber).catch(() => [])
+      Promise.resolve(matchedDailyReports),
+      Promise.resolve(matchedTransportReports),
+      getProjectTimeSummary(resolvedLvNumber),
+      findSharePointProjectItems(resolvedLvNumber).catch(() => [])
     ]);
 
   const address =
@@ -83,8 +116,8 @@ export async function GET(request: NextRequest) {
   ]);
 
   const summary: ProjectSummary = {
-    lvNumber,
-    projectLabel: pickProjectLabel({ lvNumber, address, client }),
+    lvNumber: resolvedLvNumber,
+    projectLabel: pickProjectLabel({ lvNumber: resolvedLvNumber, address, client }),
     address,
     client,
     bauleiter,

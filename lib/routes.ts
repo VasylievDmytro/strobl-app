@@ -1,7 +1,6 @@
 import type { Route } from "next";
 import type { ComponentType } from "react";
 import {
-  BtrSectionIcon,
   BaustellenSectionIcon,
   DailySectionIcon,
   GeoCaptureSectionIcon,
@@ -46,11 +45,6 @@ export const appRoutes: AppRoute[] = [
     ]
   },
   {
-    title: "BTR System",
-    href: "/btr-system",
-    icon: BtrSectionIcon
-  },
-  {
     title: "Baustellen",
     href: "/baustellen",
     icon: BaustellenSectionIcon
@@ -81,7 +75,6 @@ export const routeTitles = new Map<string, string>([
   ["/", "Home"],
   ["/rechnungen/eingangsrechnungen", "Eingangsrechnungen"],
   ["/rechnungen/ausgangsrechnungen", "Ausgangsrechnungen"],
-  ["/btr-system", "BTR System"],
   ["/baustellen", "Baustellen"],
   ["/transportbericht", "Transportbericht"],
   ["/geocapture", "GeoCapture"],

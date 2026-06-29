@@ -13,6 +13,7 @@ import type {
   HomeSummary,
   IncomingInvoice,
   InvoiceFilters,
+  ProjectSearchOption,
   ProjectTimeSourceSummary,
   ReportFilters,
   SmapOneAnalytics,
@@ -268,6 +269,22 @@ function distinctSorted(values: string[]) {
   );
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+function startsWithIgnoreCase(value: string, search?: string) {
+  if (!search) {
+    return true;
+  }
+
+  return normalizeSearchValue(value).startsWith(normalizeSearchValue(search));
+}
+
 function chunkValues(values: string[], size: number) {
   const chunks: string[][] = [];
 
@@ -322,19 +339,13 @@ function buildInvoiceFetchXml(filters: InvoiceFilters) {
 
   if (filters.supplier) {
     conditions.push(
-      `<condition attribute="cr5ce_anzeigename" operator="like" value="${xmlEscape(filters.supplier)}%" />`
+      `<filter type="or"><condition attribute="cr5ce_anzeigename" operator="like" value="${xmlEscape(filters.supplier)}%" /><condition attribute="cr5ce_belegnummer" operator="like" value="${xmlEscape(filters.supplier)}%" /></filter>`
     );
   }
 
   if (filters.bauleiter) {
     conditions.push(
       `<condition attribute="cr5ce_bauleiter" operator="eq" value="${xmlEscape(filters.bauleiter)}" />`
-    );
-  }
-
-  if (filters.search) {
-    conditions.push(
-      `<filter type="or"><condition attribute="cr5ce_lvnummer" operator="like" value="${xmlEscape(filters.search)}%" /><condition attribute="cr5ce_belegnummer" operator="like" value="${xmlEscape(filters.search)}%" /></filter>`
     );
   }
 
@@ -385,7 +396,7 @@ function buildReportFetchXml(entityName: string, filters: ReportFilters) {
       `<filter type="or">${filters.lvNumbers
         .map(
           (value) =>
-            `<condition attribute="cr5ce_lv_nummer" operator="like" value="%${xmlEscape(value)}%" />`
+            `<condition attribute="cr5ce_lv_nummer" operator="like" value="%${xmlEscape(value)}%" /><condition attribute="cr5ce_adresse" operator="like" value="%${xmlEscape(value)}%" />`
         )
         .join("")}</filter>`
     );
@@ -538,6 +549,74 @@ async function getLiveDailyParents(filters: ReportFilters) {
     buildReportFetchXml("cr5ce_tagesbericht", filters)
   );
   return rows.map(mapDailyReport);
+}
+
+function buildProjectSearchOptions(
+  reports: Array<{ lvNumber: string; address: string }>
+): ProjectSearchOption[] {
+  const byLvNumber = new Map<string, ProjectSearchOption>();
+
+  for (const report of reports) {
+    if (!report.lvNumber || byLvNumber.has(report.lvNumber)) {
+      continue;
+    }
+
+    byLvNumber.set(report.lvNumber, {
+      lvNumber: report.lvNumber,
+      address: report.address,
+      label: [report.lvNumber, report.address].filter(Boolean).join(" | ")
+    });
+  }
+
+  return Array.from(byLvNumber.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "de")
+  );
+}
+
+async function getLiveInvoiceProjectSearchOptions(scope: DataScope = {}) {
+  const [daily, transport] = await Promise.all([
+    getLiveDailyParents({ bauleiter: scope.bauleiter }),
+    getLiveTransportParents({ bauleiter: scope.bauleiter })
+  ]);
+
+  return buildProjectSearchOptions([...daily, ...transport]);
+}
+
+function invoiceMatchesProjectSearch(
+  invoice: IncomingInvoice,
+  search: string | undefined,
+  projectOptions: ProjectSearchOption[]
+) {
+  if (!search) {
+    return true;
+  }
+
+  const matchingLvNumbers = new Set(
+    projectOptions
+      .filter(
+        (option) =>
+          startsWithIgnoreCase(option.lvNumber, search) ||
+          startsWithIgnoreCase(option.address, search) ||
+          startsWithIgnoreCase(option.label, search)
+      )
+      .map((option) => option.lvNumber)
+  );
+
+  return startsWithIgnoreCase(invoice.lvNumber, search) || matchingLvNumbers.has(invoice.lvNumber);
+}
+
+function attachProjectAddresses(
+  invoices: IncomingInvoice[],
+  projectOptions: ProjectSearchOption[]
+) {
+  const addressByLvNumber = new Map(
+    projectOptions.map((option) => [option.lvNumber, option.address])
+  );
+
+  return invoices.map((invoice) => ({
+    ...invoice,
+    projectAddress: addressByLvNumber.get(invoice.lvNumber) || undefined
+  }));
 }
 
 async function getRowsByParent(
@@ -876,12 +955,23 @@ function matchesProjectFilter(entry: GeoCaptureEntry, projectNumbers: string[]) 
     return true;
   }
 
-  const projectValue = (entry.projectNumber || entry.costCenter || "").toLowerCase();
-  if (!projectValue) {
+  const projectValue = entry.projectNumber || entry.costCenter || "";
+  const candidates = [
+    projectValue,
+    entry.address ?? "",
+    [projectValue, entry.address].filter(Boolean).join(" | ")
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+
+  if (!candidates.length) {
     return false;
   }
 
-  return projectNumbers.some((value) => projectValue.includes(value.toLowerCase()));
+  return projectNumbers.some((value) => {
+    const normalizedValue = normalizeSearchValue(value);
+    return candidates.some((candidate) => candidate.includes(normalizedValue));
+  });
 }
 
 function matchesSmapOneProjectFilter(entry: SmapOneTimeEntry, projectNumbers: string[]) {
@@ -889,12 +979,70 @@ function matchesSmapOneProjectFilter(entry: SmapOneTimeEntry, projectNumbers: st
     return true;
   }
 
-  const projectValue = (entry.projectNumber || "").toLowerCase();
-  if (!projectValue) {
+  const projectValue = entry.projectNumber || "";
+  const candidates = [
+    projectValue,
+    entry.address ?? "",
+    [projectValue, entry.address].filter(Boolean).join(" | ")
+  ]
+    .map(normalizeSearchValue)
+    .filter(Boolean);
+
+  if (!candidates.length) {
     return false;
   }
 
-  return projectNumbers.some((value) => projectValue.includes(value.toLowerCase()));
+  return projectNumbers.some((value) => {
+    const normalizedValue = normalizeSearchValue(value);
+    return candidates.some((candidate) => candidate.includes(normalizedValue));
+  });
+}
+
+function reportMatchesVehicleSearch(report: { vehicleLabel?: string }, values?: string[]) {
+  if (!values?.length) {
+    return true;
+  }
+
+  const vehicleLabel = normalizeSearchValue(report.vehicleLabel ?? "");
+  if (!vehicleLabel) {
+    return false;
+  }
+
+  return values.some((value) => vehicleLabel.includes(normalizeSearchValue(value)));
+}
+
+function getTimeProjectSearchOptions(
+  entries: Array<{ projectNumber?: string; costCenter?: string; address?: string }>
+): ProjectSearchOption[] {
+  const byProject = new Map<string, ProjectSearchOption>();
+
+  for (const entry of entries) {
+    const projectNumber = entry.projectNumber || entry.costCenter || "";
+    if (!projectNumber || byProject.has(projectNumber)) {
+      continue;
+    }
+
+    byProject.set(projectNumber, {
+      lvNumber: projectNumber,
+      address: entry.address ?? "",
+      label: [projectNumber, entry.address].filter(Boolean).join(" | ")
+    });
+  }
+
+  return Array.from(byProject.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "de")
+  );
+}
+
+function expandProjectSearchValues(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .flatMap((value) => [value, ...value.split("|")])
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function buildMonthlyTrend(entries: GeoCaptureEntry[], months: Date[]): GeoCaptureTrendPoint[] {
@@ -1051,6 +1199,7 @@ export async function getLiveGeoCaptureAnalytics(
   const availableProjects = distinctSorted(
     periodEntries.map((entry) => entry.projectNumber || entry.costCenter || "")
   );
+  const projectSearchOptions = getTimeProjectSearchOptions(periodEntries);
 
   const employeeName = filters.employeeName?.trim();
   const projectNumbers = Array.from(new Set((filters.projectNumbers ?? []).filter(Boolean)));
@@ -1139,6 +1288,7 @@ export async function getLiveGeoCaptureAnalytics(
     selectedDate: selectedDayRange.dateValue,
     availableEmployees,
     availableProjects,
+    projectSearchOptions,
     totalHours,
     activeEmployees,
     averageHoursPerEmployee: activeEmployees ? totalHours / activeEmployees : 0,
@@ -1174,7 +1324,7 @@ export async function getLiveSmapOneAnalytics(
   const trendEntries = await getSmapOneEntries(
     formatDateInputValue(dataStart),
     formatDateInputValue(rangeEnd),
-    projectNumbers
+    expandProjectSearchValues(projectNumbers)
   );
 
   const scopedEntries =
@@ -1192,6 +1342,7 @@ export async function getLiveSmapOneAnalytics(
   const availableEmployees = distinctSorted(periodEntries.map((entry) => entry.employeeName));
   const availableBauleiter = distinctSorted(periodEntries.map((entry) => entry.bauleiter || ""));
   const availableProjects = distinctSorted(periodEntries.map((entry) => entry.projectNumber || ""));
+  const projectSearchOptions = getTimeProjectSearchOptions(periodEntries);
   const employeeName = filters.employeeName?.trim();
   const bauleiter = filters.bauleiter?.trim();
 
@@ -1259,6 +1410,7 @@ export async function getLiveSmapOneAnalytics(
     availableEmployees,
     availableBauleiter,
     availableProjects,
+    projectSearchOptions,
     totalHours,
     activeEmployees,
     averageHoursPerEmployee: activeEmployees ? totalHours / activeEmployees : 0,
@@ -1290,20 +1442,30 @@ export async function getLiveSmapOneAnalytics(
 }
 
 export async function getLiveInvoiceFilterOptions(scope: DataScope = {}): Promise<FilterOptions> {
-  const rows = await getLiveInvoices({ passt: "all", bauleiter: scope.bauleiter });
+  const [rows, projectSearchOptions] = await Promise.all([
+    getLiveInvoices({ passt: "all", bauleiter: scope.bauleiter }),
+    getLiveInvoiceProjectSearchOptions(scope)
+  ]);
 
   return {
     bauleiter: distinctSorted(rows.map((item) => item.bauleiter)),
-    lvNumbers: distinctSorted(rows.map((item) => item.lvNumber))
+    lvNumbers: distinctSorted(rows.map((item) => item.lvNumber)),
+    supplierSearchOptions: distinctSorted(
+      rows.flatMap((item) => [item.supplierName, item.invoiceNumber])
+    ),
+    projectSearchOptions
   };
 }
 
 export async function getLiveIncomingInvoices(filters: InvoiceFilters) {
-  const invoices = await getLiveInvoices(filters);
+  const [invoices, projectSearchOptions] = await Promise.all([
+    getLiveInvoices(filters),
+    getLiveInvoiceProjectSearchOptions({ bauleiter: filters.bauleiter })
+  ]);
 
-  return invoices.sort(
-    (left, right) => +new Date(right.bookingDate) - +new Date(left.bookingDate)
-  );
+  return attachProjectAddresses(invoices, projectSearchOptions)
+    .filter((invoice) => invoiceMatchesProjectSearch(invoice, filters.search, projectSearchOptions))
+    .sort((left, right) => +new Date(right.bookingDate) - +new Date(left.bookingDate));
 }
 
 export async function getLiveInvoiceAccess(invoiceId: string, scope: DataScope = {}) {
@@ -1341,13 +1503,17 @@ export async function getLiveTransportFilterOptions(
 
   return {
     bauleiter: distinctSorted(rows.map((item) => item.bauleiter)),
-    lvNumbers: distinctSorted(rows.map((item) => item.lvNumber))
+    lvNumbers: distinctSorted(rows.map((item) => item.lvNumber)),
+    projectSearchOptions: buildProjectSearchOptions(rows)
   };
 }
 
 export async function getLiveTransportReports(filters: ReportFilters) {
   const reports = await getLiveTransportParents(filters);
-  return attachTransportSummaries(reports);
+  const reportsWithSummaries = await attachTransportSummaries(reports);
+  return reportsWithSummaries.filter((report) =>
+    reportMatchesVehicleSearch(report, filters.vehicleLabels)
+  );
 }
 
 export async function getLiveTransportReportAccess(reportId: string, scope: DataScope = {}) {
@@ -1424,6 +1590,7 @@ export async function getLiveDailyFilterOptions(scope: DataScope = {}): Promise<
   return {
     bauleiter: distinctSorted(rows.map((item) => item.bauleiter)),
     lvNumbers: distinctSorted(rows.map((item) => item.lvNumber)),
+    projectSearchOptions: buildProjectSearchOptions(rows),
     reportTypes: distinctSorted(rows.map((item) => item.reportType ?? item.reportName))
   };
 }

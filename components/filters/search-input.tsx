@@ -4,6 +4,7 @@ interface SearchInputProps {
   value: string;
   onChange: (value: string) => void;
   inputClassName?: string;
+  suggestions?: string[];
 }
 
 export function SearchInput({
@@ -11,8 +12,14 @@ export function SearchInput({
   placeholder,
   value,
   onChange,
-  inputClassName
+  inputClassName,
+  suggestions
 }: SearchInputProps) {
+  const suggestionItems = suggestions ?? [];
+  const listId = suggestionItems.length
+    ? `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-suggestions`
+    : undefined;
+
   return (
     <label className="space-y-2">
       <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
@@ -22,8 +29,16 @@ export function SearchInput({
         className={`input-shell ${inputClassName ?? ""}`}
         value={value}
         placeholder={placeholder}
+        list={listId}
         onChange={(event) => onChange(event.target.value)}
       />
+      {listId ? (
+        <datalist id={listId}>
+          {suggestionItems.map((suggestion) => (
+            <option key={suggestion} value={suggestion} />
+          ))}
+        </datalist>
+      ) : null}
     </label>
   );
 }

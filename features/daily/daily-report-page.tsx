@@ -3,6 +3,7 @@
 import { CloudRain, Download, FileText, RotateCcw, Sun, Wind } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
+import { ProjectSearchInput } from "@/components/filters/project-search-input";
 import { PageTitle } from "@/components/page-title";
 import { DataTable } from "@/components/ui/data-table";
 import { DetailPanel } from "@/components/ui/detail-panel";
@@ -41,11 +42,11 @@ const initialFilters: ReportFilters = {
   reportType: ""
 };
 
-function parseLvNumbers(value: string) {
+function parseProjectSearchTerms(value: string) {
   return Array.from(
     new Set(
       value
-        .split(/[\n,;]+/)
+        .split(/[\n,;|]+/)
         .map((item) => item.trim())
         .filter(Boolean)
     )
@@ -143,6 +144,16 @@ export function DailyReportPage() {
   }, [isAdmin, lockedBauleiter, response?.options.bauleiter]);
 
   const typeOptions = response?.options.reportTypes ?? [];
+  const projectSearchOptions = useMemo(() => {
+    const projectOptions = response?.options.projectSearchOptions ?? [];
+    const addresses = projectOptions.map((option) => option.address).filter(Boolean);
+    const labels = projectOptions.map((option) => option.label);
+    const lvNumbers = response?.options.lvNumbers ?? [];
+
+    return Array.from(new Set([...lvNumbers, ...addresses, ...labels])).sort((left, right) =>
+      left.localeCompare(right, "de")
+    );
+  }, [response?.options.lvNumbers, response?.options.projectSearchOptions]);
 
   function handleOpenDocument(url?: string) {
     if (!url) {
@@ -229,25 +240,20 @@ export function DailyReportPage() {
           </select>
         </label>
 
-        <label className="space-y-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
-            LV Nummern
-          </span>
-          <div className="space-y-2">
-            <p className="text-xs leading-5 text-ink-400">Beispiel: 260014-104, 250085-103</p>
-            <input
-              type="text"
-              className="input-shell"
-              placeholder="Mehrere Nummern mit Komma trennen"
-              value={lvNumberInput}
-              onChange={(event) => {
-                const value = event.target.value;
-                setLvNumberInput(value);
-                setFilters((current) => ({ ...current, lvNumbers: parseLvNumbers(value) }));
-              }}
-            />
-          </div>
-        </label>
+        <ProjectSearchInput
+          label="LV / Baustellenadresse"
+          hint="Beispiel: 260014-104, Starnberg oder Adresse aus der Liste"
+          placeholder="LV oder Adresse eingeben"
+          value={lvNumberInput}
+          suggestions={projectSearchOptions}
+          onChange={(value) => {
+            setLvNumberInput(value);
+            setFilters((current) => ({
+              ...current,
+              lvNumbers: parseProjectSearchTerms(value)
+            }));
+          }}
+        />
 
         <label className="space-y-2">
           <span className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-400">
